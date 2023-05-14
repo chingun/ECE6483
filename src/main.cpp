@@ -136,32 +136,43 @@ int main() {
   int remaining_attempts = 5;
   bool correct = false;
 
+  BSP_LCD_DisplayStringAt(0, LINE(5), (uint8_t *)"No Record", CENTER_MODE);
+
   enter_key.fall(&updateState);
 
   while (1) {
     if (flag) {
       BSP_LCD_Clear(LCD_COLOR_WHITE);
       BSP_LCD_SetTextColor(LCD_COLOR_BLACK);
+
       switch (state) {
         case IDLE:
           record.clear();
           attempt.clear();
           state = RECORDING;
+          BSP_LCD_DisplayStringAt(0, LINE(5), (uint8_t *)"Recording...", CENTER_MODE);
           break;
         case RECORDING:
-          BSP_LCD_DisplayStringAt(0, LINE(5), (uint8_t *)"Recording...", CENTER_MODE);
           state = WAITING;
+          BSP_LCD_DisplayStringAt(0, LINE(5), (uint8_t *)"Unlock?", CENTER_MODE);
           break;
         case WAITING:
-          BSP_LCD_DisplayStringAt(0, LINE(5), (uint8_t *)"Unlock?", CENTER_MODE);
+          BSP_LCD_DisplayStringAt(0, LINE(5), (uint8_t *)"Unlock Attempt", CENTER_MODE);
           state = UNLOCKING;
           index = 0;
           break;
         case UNLOCKING:
+          BSP_LCD_DisplayStringAt(0, LINE(5), (uint8_t *)"Checking..", CENTER_MODE);
           state = CHECKING;
+          for (int i=0;i<max_sequence_length;i++){
+            printf("%d;%d;%d\n",record[i].x,record[i].y,record[i].z);
+          }
+          printf("Running Sequence Comparison\n");
+          for (int i=0;i<max_sequence_length;i++){
+            printf("%d;%d;%d\n",attempt[i].x,attempt[i].y,attempt[i].z);
+          }
           break;
         case CHECKING:
-          printf("Running Sequence Comparison\n");
           correct = compare_sequences(record, attempt, 100);
           if (!correct) {
             BSP_LCD_SetTextColor(LCD_COLOR_RED);
@@ -170,7 +181,7 @@ int main() {
               state = LOCKED;
               break;
             } else {
-              state = UNLOCKING;
+              state = WAITING;
               remaining_attempts--;
               printf("Incorrect. %d attempts remaining...\n", remaining_attempts);
               break;
@@ -183,7 +194,7 @@ int main() {
           }
         case LOCKED: 
           BSP_LCD_SetTextColor(LCD_COLOR_RED);
-          BSP_LCD_DisplayStringAt(0, LINE(5), (uint8_t *)"LOCKED.", CENTER_MODE);
+          BSP_LCD_DisplayStringAt(0, LINE(5), (uint8_t *)"PERMA-LOCKED.", CENTER_MODE);
           state = LOCKED;
           break;
         default:
