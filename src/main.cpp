@@ -96,8 +96,7 @@ bool compare_sequences(const std::vector<GyroData>& seq1, const std::vector<Gyro
   std::transform(seq2.begin(), seq2.end(), y2.begin(), [](const auto& d) { return d.y; });
   std::transform(seq2.begin(), seq2.end(), z2.begin(), [](const auto& d) { return d.z; });
 
-  return (compute_cross_correlation(x1, x2) > threshold) && 
-         (compute_cross_correlation(y1, y2) > threshold) && 
+  return (compute_cross_correlation(x1, x2) > threshold) && (compute_cross_correlation(y1, y2) > threshold) && 
          (compute_cross_correlation(z1, z2) > threshold);
 }
 
@@ -141,38 +140,30 @@ int main() {
 
   while (1) {
     if (flag) {
+      BSP_LCD_Clear(LCD_COLOR_WHITE);
+      BSP_LCD_SetTextColor(LCD_COLOR_BLACK);
       switch (state) {
         case IDLE:
           record.clear();
           attempt.clear();
-          printf("IDLE -> RECORDING\n");
-          BSP_LCD_Clear(LCD_COLOR_WHITE);
           state = RECORDING;
           break;
         case RECORDING:
-          printf("RECORDING -> WAITING\n");
-          BSP_LCD_Clear(LCD_COLOR_WHITE);
-          BSP_LCD_SetTextColor(LCD_COLOR_BLACK);
           BSP_LCD_DisplayStringAt(0, LINE(5), (uint8_t *)"Recording...", CENTER_MODE);
           state = WAITING;
           break;
         case WAITING:
-          printf("WAITING -> UNLOCKING\n");
-          BSP_LCD_Clear(LCD_COLOR_WHITE);
-          BSP_LCD_SetTextColor(LCD_COLOR_BLACK);
           BSP_LCD_DisplayStringAt(0, LINE(5), (uint8_t *)"Unlock?", CENTER_MODE);
           state = UNLOCKING;
           index = 0;
           break;
         case UNLOCKING:
-          printf("UNLOCKING -> CHECKING\n");
           state = CHECKING;
           break;
         case CHECKING:
-          printf("Checking sequences\n");
+          printf("Running Sequence Comparison\n");
           correct = compare_sequences(record, attempt, 100);
           if (!correct) {
-            BSP_LCD_Clear(LCD_COLOR_WHITE);
             BSP_LCD_SetTextColor(LCD_COLOR_RED);
             BSP_LCD_DisplayStringAt(0, LINE(5), (uint8_t *)"Incorrect :(", CENTER_MODE);
             if (remaining_attempts == 0) {
@@ -185,15 +176,12 @@ int main() {
               break;
             }
           } else {
-            printf("Correct! Checking -> IDLE\n");
-            BSP_LCD_Clear(LCD_COLOR_WHITE);
             BSP_LCD_SetTextColor(LCD_COLOR_GREEN);
             BSP_LCD_DisplayStringAt(0, LINE(5), (uint8_t *)"Unlocked :)", CENTER_MODE);
             state = IDLE;
             break;
           }
-        case LOCKED:
-          BSP_LCD_Clear(LCD_COLOR_WHITE);
+        case LOCKED: 
           BSP_LCD_SetTextColor(LCD_COLOR_RED);
           BSP_LCD_DisplayStringAt(0, LINE(5), (uint8_t *)"LOCKED.", CENTER_MODE);
           state = LOCKED;
