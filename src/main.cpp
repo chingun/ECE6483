@@ -57,7 +57,7 @@ double compute_cross_correlation(const std::vector<double> &x, const std::vector
 GyroData read_gyro();
 GyroData raw_data;
 
-int8_t x[3],y[3],z[3],write_buf[32],buffer[32];
+int8_t write_buf[32],buffer[32];
 int16_t temp;
 
 int8_t def[3] = {0};
@@ -76,14 +76,6 @@ State state = IDLE;
 
 void updateState() {
   flag = true;
-}
-
-int8_t smoothCurve(int8_t *history, int8_t n0){
-  int8_t tmp = (int8_t) ((0.1*history[0]) + (0.1*history[1]) + (0.2*history[2]) + (0.6*n0));
-  history[0] = history[1];
-  history[1] = history[2];
-  history[2] = n0;
-  return tmp;
 }
 
 void setMode() {
@@ -204,9 +196,6 @@ int main() {
         case RECORDING:
           state = WAITING;
           BSP_LCD_DisplayStringAt(0, LINE(5), (uint8_t *)"Unlock?", CENTER_MODE);
-          memset(x, 0, sizeof(x));
-          memset(y, 0, sizeof(y));
-          memset(z, 0, sizeof(z));
           break;
         case WAITING:
           BSP_LCD_DisplayStringAt(0, LINE(5), (uint8_t *)"Recording...", CENTER_MODE);
