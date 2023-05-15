@@ -220,7 +220,7 @@ int main() {
               state = LOCKED;
               break;
             } else {
-              state = WAITING;
+              state = RECORDING;
               remaining_attempts--;
               printf("Incorrect. %d attempts remaining...\n", remaining_attempts);
               break;
