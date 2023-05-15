@@ -2,6 +2,7 @@
 #include <math.h>
 #include <vector>
 #include <cmath>
+#include <string.h>
 #include "stm32f4xx_hal.h"
 #include "stm32f429i_discovery_lcd.h"
 
@@ -29,10 +30,8 @@ extern "C" void wait_ms(int ms) {
 }
 
 struct GyroData {
-  uint16_t x, y, z;
+  int16_t x, y, z;
 };
-
-
 
 const int threshold = 1000;
 const int max_sequence_length = 300;
@@ -58,8 +57,10 @@ double compute_cross_correlation(const std::vector<double> &x, const std::vector
 GyroData read_gyro();
 GyroData raw_data;
 
-uint8_t x[3],y[3],z[3],write_buf[32],buffer[32];
-uint16_t temp;
+int8_t x[3],y[3],z[3],write_buf[32],buffer[32];
+int16_t temp;
+
+int8_t def[3] = {0};
 
 // Define state variables
 enum State {
@@ -77,8 +78,8 @@ void updateState() {
   flag = true;
 }
 
-uint8_t smoothCurve(uint8_t *history, uint8_t n0){
-  uint8_t tmp = (uint8_t) ((0.1*history[0]) + (0.1*history[1]) + (0.2*history[2]) + (0.6*n0));
+int8_t smoothCurve(int8_t *history, int8_t n0){
+  int8_t tmp = (int8_t) ((0.1*history[0]) + (0.1*history[1]) + (0.2*history[2]) + (0.6*n0));
   history[0] = history[1];
   history[1] = history[2];
   history[2] = n0;
@@ -114,28 +115,28 @@ GyroData read_gyro() {
   flags.wait_all(SPI_FLAG);
   
   temp = ( ( (uint16_t)buffer[2] ) <<8 ) | ( (uint16_t)buffer[1] );
-  raw_data.x = smoothCurve(x,(int)((temp)*(17.5f*0.017453292519943295769236907684886f / 1000.0f)));
+  raw_data.x = (int)((temp)*(17.5f*0.017453292519943295769236907684886f / 1000.0f));
 
   temp = ( ( (uint16_t)buffer[4] ) <<8 ) | ( (uint16_t)buffer[3] );
-  raw_data.y = smoothCurve(y,(int)((temp)*(17.5f*0.017453292519943295769236907684886f / 1000.0f))); //smoothCurve(x,temp);
+  raw_data.y = (int)((temp)*(17.5f*0.017453292519943295769236907684886f / 1000.0f)); 
 
   temp = ( ( (uint16_t)buffer[6] ) <<8 ) | ( (uint16_t)buffer[5] );
-  raw_data.z = smoothCurve(z,(int)((temp)*(17.5f*0.017453292519943295769236907684886f / 1000.0f))); //smoothCurve(x,temp);
+  raw_data.z = (int)((temp)*(17.5f*0.017453292519943295769236907684886f / 1000.0f));
 
   return raw_data;
 }
 
 void setup_gyro() {
   cs = 1;
-  setMode();
   spi.format(8, 3);
   spi.frequency(100000);
+  setMode();
 } 
 
 bool compare_sequences(const std::vector<GyroData>& seq1, const std::vector<GyroData>& seq2, double threshold) {
   int n = std::max(seq1.size(), seq2.size());
-
   std::vector<double> x1(n, 0), y1(n, 0), z1(n, 0), x2(n, 0), y2(n, 0), z2(n, 0);
+
   std::transform(seq1.begin(), seq1.end(), x1.begin(), [](const auto& d) { return d.x; });
   std::transform(seq1.begin(), seq1.end(), y1.begin(), [](const auto& d) { return d.y; });
   std::transform(seq1.begin(), seq1.end(), z1.begin(), [](const auto& d) { return d.z; });
@@ -203,9 +204,12 @@ int main() {
         case RECORDING:
           state = WAITING;
           BSP_LCD_DisplayStringAt(0, LINE(5), (uint8_t *)"Unlock?", CENTER_MODE);
+          memset(x, 0, sizeof(x));
+          memset(y, 0, sizeof(y));
+          memset(z, 0, sizeof(z));
           break;
         case WAITING:
-          BSP_LCD_DisplayStringAt(0, LINE(5), (uint8_t *)"Unlock Attempt", CENTER_MODE);
+          BSP_LCD_DisplayStringAt(0, LINE(5), (uint8_t *)"Recording...", CENTER_MODE);
           state = UNLOCKING;
           index = 0;
           break;
@@ -242,7 +246,7 @@ int main() {
           }
         case LOCKED: 
           BSP_LCD_SetTextColor(LCD_COLOR_RED);
-          BSP_LCD_DisplayStringAt(0, LINE(5), (uint8_t *)"PERMA-LOCKED.", CENTER_MODE);
+          BSP_LCD_DisplayStringAt(0, LINE(5), (uint8_t *)"Failed!", CENTER_MODE);
           state = LOCKED;
           break;
         default:
