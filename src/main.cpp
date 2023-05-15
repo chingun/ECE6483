@@ -33,7 +33,7 @@ struct GyroData {
   int16_t x, y, z;
 };
 
-const int threshold = 1000;
+const int threshold = 100;
 const int max_sequence_length = 300;
 volatile bool flag = false;
 
@@ -59,8 +59,6 @@ GyroData raw_data;
 
 int8_t write_buf[32],buffer[32];
 int16_t temp;
-
-int8_t def[3] = {0};
 
 // Define state variables
 enum State {
