@@ -1,8 +1,11 @@
 #include <mbed.h>
 #include <vector>
+#include <complex>
+#include <cmath>
 #include <algorithm>
 #include "stm32f4xx_hal.h"
 #include "stm32f429i_discovery_lcd.h"
+#include <fftw3.h>  // Include the FFTW header file
 
 using namespace std;
 
@@ -84,20 +87,102 @@ public:
     }
 
 private:
-    double computeCrossCorrelation(const vector<int16_t>& x, const vector<int16_t>& y) {
-        int n = min(x.size(), y.size());
-        double distance = 0;
-        int N = 0;
+    double computeCrossCorrelation(const std::vector<int16_t>& x, const std::vector<int16_t>& y) {
+        int n = std::min(x.size(), y.size());
+        int paddedSize = 2 * pow(2, ceil(log2(n))); // Next power of 2 for efficient FFT
+        std::vector<std::complex<double>> fftX(paddedSize, 0.0);
+        std::vector<std::complex<double>> fftY(paddedSize, 0.0);
 
+        // Create FFTW plans
+        fftw_complex* inX = reinterpret_cast<fftw_complex*>(fftX.data());
+        fftw_complex* inY = reinterpret_cast<fftw_complex*>(fftY.data());
+        fftw_plan planX = fftw_plan_dft_1d(paddedSize, inX, inX, FFTW_FORWARD, FFTW_ESTIMATE);
+        fftw_plan planY = fftw_plan_dft_1d(paddedSize, inY, inY, FFTW_FORWARD, FFTW_ESTIMATE);
+
+        // Perform FFT on x
         for (int i = 0; i < n; i++) {
-            if (x[i] && y[i]) {
-                distance += abs(x[i] - y[i]);
-                N++;
-            }
+            fftX[i] = x[i];
+        }
+        fftw_execute(planX);
+
+        // Perform FFT on y
+        for (int i = 0; i < n; i++) {
+            fftY[i] = y[i];
+        }
+        fftw_execute(planY);
+
+        // Calculate cross-correlation in frequency domain
+        std::vector<std::complex<double>> crossCorr(paddedSize, 0.0);
+        for (int i = 0; i < paddedSize; i++) {
+            crossCorr[i] = std::conj(fftX[i]) * fftY[i];
+        }
+        fftw_plan planInv = fftw_plan_dft_1d(paddedSize, reinterpret_cast<fftw_complex*>(crossCorr.data()),
+                                            reinterpret_cast<fftw_complex*>(crossCorr.data()), FFTW_BACKWARD, FFTW_ESTIMATE);
+        fftw_execute(planInv);
+
+        // Find maximum value in cross-correlation
+        double maxCorrelation = 0.0;
+        for (int i = 0; i < n; i++) {
+            double correlation = std::abs(crossCorr[i]);
+            maxCorrelation = std::max(maxCorrelation, correlation);
         }
 
-        return N ? distance / N : 0;
+        // Clean up FFTW plans and allocated memory
+        fftw_destroy_plan(planX);
+        fftw_destroy_plan(planY);
+        fftw_destroy_plan(planInv);
+
+        return maxCorrelation;
     }
+
+    // double computeCrossCorrelation(const vector<int16_t>& x, const vector<int16_t>& y) {
+    //     int n = min(x.size(), y.size());
+    //     int paddedSize = 2 * pow(2, ceil(log2(n))); // Next power of 2 for efficient FFT
+    //     vector<complex<double>> fftX(paddedSize, 0.0);
+    //     vector<complex<double>> fftY(paddedSize, 0.0);
+
+    //     // Perform FFT on x
+    //     for (int i = 0; i < n; i++) {
+    //         fftX[i] = x[i];
+    //     }
+    //     fft(fftX);
+
+    //     // Perform FFT on y
+    //     for (int i = 0; i < n; i++) {
+    //         fftY[i] = y[i];
+    //     }
+    //     fft(fftY);
+
+    //     // Calculate cross-correlation in frequency domain
+    //     vector<complex<double>> crossCorr(paddedSize, 0.0);
+    //     for (int i = 0; i < paddedSize; i++) {
+    //         crossCorr[i] = conj(fftX[i]) * fftY[i];
+    //     }
+    //     ifft(crossCorr);
+
+    //     // Find maximum value in cross-correlation
+    //     double maxCorrelation = 0.0;
+    //     for (int i = 0; i < n; i++) {
+    //         double correlation = abs(crossCorr[i]);
+    //         maxCorrelation = max(maxCorrelation, correlation);
+    //     }
+
+    //     return maxCorrelation;
+    // }
+    // double computeCrossCorrelation(const vector<int16_t>& x, const vector<int16_t>& y) {
+    //     int n = min(x.size(), y.size());
+    //     double distance = 0;
+    //     int N = 0;
+
+    //     for (int i = 0; i < n; i++) {
+    //         if (x[i] && y[i]) {
+    //             distance += abs(x[i] - y[i]);
+    //             N++;
+    //         }
+    //     }
+
+    //     return N ? distance / N : 0;
+    // }
 
     double threshold;
 };
