@@ -241,6 +241,7 @@ int main() {
                     break;
                 }
                 case LOCKED:
+                    BSP_LCD_Clear(LCD_COLOR_WHITE); 
                     lcdDisplay.displayText("BLOCKED", 5, LCD_COLOR_BLACK);
                     state = LOCKED; //State when all attempts have been used
                     break;
