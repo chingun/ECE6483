@@ -5,16 +5,23 @@
 #include <algorithm>
 #include "stm32f4xx_hal.h"
 #include "stm32f429i_discovery_lcd.h"
-#include <fftw3.h>  // Include the FFTW header file
+#include <fft.h>  // Include the FFTW header file
 
 using namespace std;
 
 extern "C" void wait_ms(int ms) { wait_us(1000*ms); }
 
+// Creativity Achievements:
+// 1. LCD Screen based user feed back
+// 2. Button debouncing for better lock performance
+// 3. User unlocks are numbered until completely locked out
+
 struct GyroData {
     int16_t x, y, z; //creating struct to store x, y, z data points
 };
 
+// Class representing a gyroscope module controlled via SPI communication.
+// The class provides methods to initialize the gyroscope and read data from it.
 class Gyroscope {
 public:
     Gyroscope(SPI& spi, DigitalOut& cs) : spi(spi), cs(cs) {}
@@ -55,6 +62,12 @@ private:
     DigitalOut& cs; //creating digital out object to set chip select high or low
 };
 
+// The GyroSequenceMatcher class is responsible for comparing sequences of GyroData
+// and determining if they are similar based on a specified threshold.
+// It calculates the cross-correlation between the x, y, and z measurements of two sequences,
+// and if the cross-correlation values are below the threshold, it considers the attempt sequence as correct.
+// The class also provides a method to compute the cross-correlation between two vectors.
+// Overall, it offers functionality to compare and analyze gyroscopic data for similarity assessment.
 class GyroSequenceMatcher {
 public:
     GyroSequenceMatcher(double threshold) : threshold(threshold) {}
@@ -89,107 +102,29 @@ public:
         return correct;
     }
 
-private:
+private: 
     double computeCrossCorrelation(const vector<int16_t>& x, const vector<int16_t>& y) {
         int n = min(x.size(), y.size());
-        int paddedSize = 2 * pow(2, ceil(log2(n))); // Next power of 2 for efficient FFT
-        vector<complex<double>> fftX(paddedSize, 0.0);
-        vector<complex<double>> fftY(paddedSize, 0.0);
+        double distance = 0;
+        int N = 0;
 
-        // Create FFTW plans
-        fftw_complex* inX = reinterpret_cast<fftw_complex*>(fftX.data());
-        fftw_complex* inY = reinterpret_cast<fftw_complex*>(fftY.data());
-        fftw_plan planX = fftw_plan_dft_1d(paddedSize, inX, inX, FFTW_FORWARD, FFTW_ESTIMATE);
-        fftw_plan planY = fftw_plan_dft_1d(paddedSize, inY, inY, FFTW_FORWARD, FFTW_ESTIMATE);
-
-        // Perform FFT on x
         for (int i = 0; i < n; i++) {
-            fftX[i] = x[i];
-        }
-        fftw_execute(planX);
-
-        // Perform FFT on y
-        for (int i = 0; i < n; i++) {
-            fftY[i] = y[i];
-        }
-        fftw_execute(planY);
-
-        // Calculate cross-correlation in frequency domain
-        vector<complex<double>> crossCorr(paddedSize, 0.0);
-        for (int i = 0; i < paddedSize; i++) {
-            crossCorr[i] = conj(fftX[i]) * fftY[i];
-        }
-        fftw_plan planInv = fftw_plan_dft_1d(paddedSize, reinterpret_cast<fftw_complex*>(crossCorr.data()),
-                                            reinterpret_cast<fftw_complex*>(crossCorr.data()), FFTW_BACKWARD, FFTW_ESTIMATE);
-        fftw_execute(planInv);
-
-        // Find maximum value in cross-correlation
-        double maxCorrelation = 0.0;
-        for (int i = 0; i < n; i++) {
-            double correlation = abs(crossCorr[i]);
-            maxCorrelation = max(maxCorrelation, correlation);
+            if (x[i] && y[i]) {
+                distance += abs(x[i] - y[i]);
+                N++;
+            }
         }
 
-        // Clean up FFTW plans and allocated memory
-        fftw_destroy_plan(planX);
-        fftw_destroy_plan(planY);
-        fftw_destroy_plan(planInv);
-
-        return maxCorrelation;
+        return N ? distance / N : 0;
     }
-
-    // double computeCrossCorrelation(const vector<int16_t>& x, const vector<int16_t>& y) {
-    //     int n = min(x.size(), y.size());
-    //     int paddedSize = 2 * pow(2, ceil(log2(n))); // Next power of 2 for efficient FFT
-    //     vector<complex<double>> fftX(paddedSize, 0.0);
-    //     vector<complex<double>> fftY(paddedSize, 0.0);
-
-    //     // Perform FFT on x
-    //     for (int i = 0; i < n; i++) {
-    //         fftX[i] = x[i];
-    //     }
-    //     fft(fftX);
-
-    //     // Perform FFT on y
-    //     for (int i = 0; i < n; i++) {
-    //         fftY[i] = y[i];
-    //     }
-    //     fft(fftY);
-
-    //     // Calculate cross-correlation in frequency domain
-    //     vector<complex<double>> crossCorr(paddedSize, 0.0);
-    //     for (int i = 0; i < paddedSize; i++) {
-    //         crossCorr[i] = conj(fftX[i]) * fftY[i];
-    //     }
-    //     ifft(crossCorr);
-
-    //     // Find maximum value in cross-correlation
-    //     double maxCorrelation = 0.0;
-    //     for (int i = 0; i < n; i++) {
-    //         double correlation = abs(crossCorr[i]);
-    //         maxCorrelation = max(maxCorrelation, correlation);
-    //     }
-
-    //     return maxCorrelation;
-    // }
-    // double computeCrossCorrelation(const vector<int16_t>& x, const vector<int16_t>& y) {
-    //     int n = min(x.size(), y.size());
-    //     double distance = 0;
-    //     int N = 0;
-
-    //     for (int i = 0; i < n; i++) {
-    //         if (x[i] && y[i]) {
-    //             distance += abs(x[i] - y[i]);
-    //             N++;
-    //         }
-    //     }
-
-    //     return N ? distance / N : 0;
-    // }
 
     double threshold;
 };
 
+// Initializes the LCD display and provides a method to display text on the screen. 
+// The constructor initializes the LCD screen by initializing the necessary components 
+// and clearing the screen. The displayText function clears the screen, sets the text 
+// color, and displays the provided text at the specified line on the LCD screen.
 class LCDDisplay {
 public:
     LCDDisplay() {
@@ -202,7 +137,6 @@ public:
         BSP_LCD_Clear(LCD_COLOR_WHITE); //Clearing the screen
     }
     void displayText(const string& text, int line, uint32_t color) {
-        BSP_LCD_Clear(LCD_COLOR_WHITE); //Clearing the screen
         BSP_LCD_SetTextColor(color); //Setting text color
         BSP_LCD_DisplayStringAt(0, LINE(line), (uint8_t*)text.c_str(), CENTER_MODE); //display text at center of the screen
     }
@@ -223,10 +157,21 @@ int main() {
     const double THRESHOLD = 15000; //Setting threshold for cross correlation
 
     volatile bool flag = false; //Initialize flag as false
-
+    bool debounceInProgress = false;
     InterruptIn enterKey(USER_BUTTON); //Setting interrupt to user button
-    enterKey.fall([&flag]() { flag = true; }); //When button is pressed, interrupt flags
-    int remainingAttempts = 5; //Setting the number of attempts
+
+    enterKey.fall([&flag, &debounceInProgress]() {
+        if (!debounceInProgress) {
+            debounceInProgress = true;
+            // Set a flag after the debounce time has passed
+            wait_ms(200);
+            // ThisThread::sleep_for(200ms); // Adjust the debounce time as needed
+            flag = true;
+            debounceInProgress = false;
+        }
+    });
+    // enterKey.fall([&flag]() { flag = true; }); //When button is pressed, interrupt flags
+    int remainingAttempts = 3; // Initializing the number of attempts
     
     while (1) {
         if (flag) {
@@ -234,38 +179,52 @@ int main() {
                 case IDLE:
                     recordData.clear(); //Clearing recorded data vector
                     attemptData.clear(); //Clearing attempted data vector
-                    printf("IDLE -> RECORDING\n");
-                    lcdDisplay.displayText("IDLE", 5, LCD_COLOR_BLACK);
+                    printf("IDLE to RECORDING\n");
+                    BSP_LCD_Clear(LCD_COLOR_WHITE); //Clearing the screen
+                    lcdDisplay.displayText("INITIALIZING", 5, LCD_COLOR_BLACK);
+                    lcdDisplay.displayText("LOCK", 6, LCD_COLOR_BLACK);
+                    lcdDisplay.displayText("SEQUENCE", 7, LCD_COLOR_BLACK);
                     state = RECORDING;
                     break;
                 case RECORDING:
-                    printf("RECORDING -> WAITING\n");
-                    lcdDisplay.displayText("Recording...", 5, LCD_COLOR_BLACK);
+                    printf("RECORDING to WAITING\n");            
+                    BSP_LCD_Clear(LCD_COLOR_WHITE); //Clearing the screen
+                    lcdDisplay.displayText("INITIAL", 5, LCD_COLOR_BLACK);
+                    lcdDisplay.displayText("KEY", 6, LCD_COLOR_BLACK);
+                    lcdDisplay.displayText("RECORDED", 7, LCD_COLOR_BLACK);
                     state = WAITING; //User is in the process of recording their attempt
                     break;
                 case WAITING:
-                    printf("WAITING -> UNLOCKING\n");
-                    lcdDisplay.displayText("Unlocking", 5, LCD_COLOR_BLACK);
+                    printf("WAITING to UNLOCKING\n");            
+                    BSP_LCD_Clear(LCD_COLOR_WHITE); //Clearing the screen
+                    lcdDisplay.displayText("RECORDING", 5, LCD_COLOR_BLACK);
+                    lcdDisplay.displayText("UNLOCK", 6, LCD_COLOR_BLACK);
+                    lcdDisplay.displayText("SEQUENCE", 6, LCD_COLOR_BLACK);
                     state = UNLOCKING;
                     break;
                 case UNLOCKING:
-                    printf("UNLOCKING -> CHECKING\n");
+                    printf("UNLOCKING to CHECKING\n");
+                    BSP_LCD_Clear(LCD_COLOR_WHITE); //Clearing the screen
+                    lcdDisplay.displayText("RECORDING", 4, LCD_COLOR_BLACK);
+                    lcdDisplay.displayText("COMPLETED", 5, LCD_COLOR_BLACK);
+                    lcdDisplay.displayText("CLICK 2 CHECK", 7, LCD_COLOR_BLACK); 
                     state = CHECKING; //Checking if recorded and attempt sequences match
                     break;
                 case CHECKING: {
-                    printf("Checking sequences\n");
+                    printf("Running Gyro Sequence Matcher\n");
                     GyroSequenceMatcher sequenceMatcher(THRESHOLD);
                     bool correct = sequenceMatcher.compare(recordData, attemptData);
 
                     if (!correct) {
-                        //Attempted sequence is incorrect
-                        lcdDisplay.displayText("Incorrect!", 5, LCD_COLOR_RED);
-                        lcdDisplay.displayText("-.-", 7, LCD_COLOR_RED);
+                        //Attempted sequence is incorrect            
+                        BSP_LCD_Clear(LCD_COLOR_WHITE); //Clearing the screen
+                        lcdDisplay.displayText("INCORRECT KEY", 5, LCD_COLOR_RED);
                         char buffer[32];
-                        sprintf(buffer, "Remaining: %d", remainingAttempts);
-                        lcdDisplay.displayText(buffer, 6, LCD_COLOR_RED); //Displays number of remaining attempts
-                        printf("Incorrect. %d attempts remaining...\n", remainingAttempts);
+                        sprintf(buffer, "Remaining: %d", remainingAttempts); 
+                        BSP_LCD_DisplayStringAt(0, LINE(6), (uint8_t *)buffer, CENTER_MODE);                       
 
+                        lcdDisplay.displayText("-.-", 9, LCD_COLOR_RED);
+                        printf("Incorrect. %d attempts remaining...\n", remainingAttempts);
                         if (remainingAttempts == 0) {
                             state = LOCKED; //All attempts have been used
                         } else {
@@ -274,14 +233,15 @@ int main() {
                         }
                     } else {
                         printf("Correct! Checking -> IDLE\n"); // Attempted key is correct
-                        lcdDisplay.displayText("Unlocked", 4, LCD_COLOR_GREEN);
+                        BSP_LCD_Clear(LCD_COLOR_WHITE); //Clearing the screen
+                        lcdDisplay.displayText("Welcome", 4, LCD_COLOR_GREEN);
                         lcdDisplay.displayText("<3", 6, LCD_COLOR_GREEN);
                         state = IDLE;
                     }
                     break;
                 }
                 case LOCKED:
-                    lcdDisplay.displayText("LOCKED.", 5, LCD_COLOR_BLACK);
+                    lcdDisplay.displayText("BLOCKED", 5, LCD_COLOR_BLACK);
                     state = LOCKED; //State when all attempts have been used
                     break;
                 default:
@@ -296,7 +256,7 @@ int main() {
                 printf("%d, %d, %d\n", data.back().x, data.back().y, data.back().z);
                 wait_us(50000);
             } else {
-                //No longer record data points if maximum array length has been exceeded
+                // No longer record data points if maximum array length has been exceeded
                 printf("Exceeded max array length\n");
             }
         }
