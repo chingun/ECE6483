@@ -1,205 +1,213 @@
 #include <mbed.h>
-#include <math.h>
 #include <vector>
-#include <cmath>
+#include <algorithm>
 #include "stm32f4xx_hal.h"
 #include "stm32f429i_discovery_lcd.h"
- 
-extern "C" void wait_ms(int ms) {
-  for (int i = 0; i < ms; i++) {
-    for (int j = 0; j < 1000; j++) {
-      __asm("nop");
-    }
-  }
-}
+
+using namespace std;
+
+extern "C" void wait_ms(int ms) { wait_us(1000*ms); }
 
 struct GyroData {
-  int16_t x, y, z;
+    int16_t x, y, z;
 };
 
-const int threshold = 100;
-const int max_sequence_length = 300;
-volatile bool flag = false;
-SPI spi(PF_9, PF_8, PF_7);
-DigitalOut cs(PC_1); 
-InterruptIn enter_key(USER_BUTTON);
+class Gyroscope {
+public:
+    Gyroscope(SPI& spi, DigitalOut& cs) : spi(spi), cs(cs) {}
 
-void set_flag();
-void set_mode();
-void setup_gyro();
-void init_display();
-bool compare_sequences(const std::vector<GyroData> &seq1, const std::vector<GyroData> &seq2, double threshold);
-double compute_cross_correlation(const std::vector<double> &x, const std::vector<double> &y);
-GyroData read_gyro();
-
-// Define state variables
-enum State {
-  IDLE,
-  RECORDING,
-  WAITING,
-  UNLOCKING,
-  CHECKING,
-  LOCKED
-};
-
-State state = IDLE;
-
-void updateState() {
-  flag = true;
-}
-
-void setMode() {
-  cs = 0;
-  spi.write(0x20);
-  spi.write(0xCF);
-  cs = 1;
-}
-
-GyroData read_gyro() {
-  const int num_bytes = 6;
-  // Initialize buffer for reading data from SPI bus
-  std::array<uint8_t, num_bytes> buffer = {0};
-
-  // Send command to start data read
-  cs = 0;
-  spi.write(0xE8);
-  // Read data from SPI bus
-  for (int i = 0; i < num_bytes; i++) {
-    buffer[i] = spi.write(0x00);
-  }
-
-  cs = 1;
-  // Parse raw data from buffer
-  GyroData raw_data;
-  raw_data.x = (buffer[1] << 8) | buffer[0];
-  raw_data.y = (buffer[3] << 8) | buffer[2];
-  raw_data.z = (buffer[5] << 8) | buffer[4];
-
-  return raw_data;
-}
-
-void setup_gyro() {
-  cs = 1;
-  setMode();
-  spi.format(8, 3);
-  spi.frequency(100000);
-} 
-
-bool compare_sequences(const std::vector<GyroData>& seq1, const std::vector<GyroData>& seq2, double threshold) {
-  int n = std::max(seq1.size(), seq2.size());
-
-  std::vector<double> x1(n, 0), y1(n, 0), z1(n, 0), x2(n, 0), y2(n, 0), z2(n, 0);
-  std::transform(seq1.begin(), seq1.end(), x1.begin(), [](const auto& d) { return d.x; });
-  std::transform(seq1.begin(), seq1.end(), y1.begin(), [](const auto& d) { return d.y; });
-  std::transform(seq1.begin(), seq1.end(), z1.begin(), [](const auto& d) { return d.z; });
-  std::transform(seq2.begin(), seq2.end(), x2.begin(), [](const auto& d) { return d.x; });
-  std::transform(seq2.begin(), seq2.end(), y2.begin(), [](const auto& d) { return d.y; });
-  std::transform(seq2.begin(), seq2.end(), z2.begin(), [](const auto& d) { return d.z; });
-
-  return (compute_cross_correlation(x1, x2) > threshold) && (compute_cross_correlation(y1, y2) > threshold) && 
-         (compute_cross_correlation(z1, z2) > threshold);
-}
-
-double compute_cross_correlation(const std::vector<double>& x, const std::vector<double>& y) {
-  int n = x.size();
-  double max_corr = 0.0;
-  for (int shift = -n + 1; shift < n; shift++) {
-    double corr = 0.0;
-    for (int i = 0; i < n; i++) {
-      int j = i + shift;
-      if (j >= 0 && j < n) {
-        corr += x[i] * y[j];
-      }
+    void initialize() {
+        cs = 1;
+        cs = 0;
+        spi.write(0x20);
+        spi.write(0xCF);
+        cs = 1;
+        spi.format(8, 3);
+        spi.frequency(100000);
     }
-    max_corr = std::max(max_corr, corr / n);
-  }
-  return max_corr;
-}
 
-void init_display() {
-  HAL_Init();
-  BSP_LCD_Init();
-  BSP_LCD_LayerDefaultInit(0, LCD_FRAME_BUFFER);
-  BSP_LCD_SelectLayer(0);
-  BSP_LCD_DisplayOn();
-  BSP_LCD_Clear(LCD_COLOR_WHITE);
-}
+    GyroData readData() {
+        cs = 0;
+        spi.write(0xE8);
+        int xl = spi.write(0x00);
+        int xh = spi.write(0x00);
+        int yl = spi.write(0x00);
+        int yh = spi.write(0x00);
+        int zl = spi.write(0x00);
+        int zh = spi.write(0x00);
+        cs = 1;
+
+        GyroData data;
+        data.x = (xh << 8) | (xl);
+        data.y = (yh << 8) | (yl);
+        data.z = (zh << 8) | (zl);
+
+        wait_us(50000);
+
+        return data;
+    }
+
+private:
+    SPI& spi;
+    DigitalOut& cs;
+};
+
+class GyroSequenceMatcher {
+public:
+    GyroSequenceMatcher(double threshold) : threshold(threshold) {}
+
+    bool compare(const vector<GyroData>& seq1, const vector<GyroData>& seq2) {
+        int n = min(seq1.size(), seq2.size());
+
+        vector<int16_t> x1(n, 0), y1(n, 0), z1(n, 0);
+        vector<int16_t> x2(n, 0), y2(n, 0), z2(n, 0);
+
+        for (int i = 0; i < n; i++) {
+            x1[i] = seq1[i].x;
+            y1[i] = seq1[i].y;
+            z1[i] = seq1[i].z;
+
+            x2[i] = seq2[i].x;
+            y2[i] = seq2[i].y;
+            z2[i] = seq2[i].z;
+        }
+
+        double distX = computeCrossCorrelation(x1, x2);
+        double distY = computeCrossCorrelation(y1, y2);
+        double distZ = computeCrossCorrelation(z1, z2);
+
+        printf("Dist: %d, %d, %d\n", (int)distX, (int)distY, (int)distZ);
+        bool correct = distX < threshold && distY < threshold && distZ < threshold;
+        printf("Correct? %d\n", correct);
+
+        return correct;
+    }
+
+private:
+    double computeCrossCorrelation(const vector<int16_t>& x, const vector<int16_t>& y) {
+        int n = min(x.size(), y.size());
+        double distance = 0;
+        int N = 0;
+
+        for (int i = 0; i < n; i++) {
+            if (x[i] && y[i]) {
+                distance += abs(x[i] - y[i]);
+                N++;
+            }
+        }
+
+        return N ? distance / N : 0;
+    }
+
+    double threshold;
+};
+
+class LCDDisplay {
+public:
+    LCDDisplay() {
+        HAL_Init();
+        BSP_LCD_Init();
+        BSP_LCD_LayerDefaultInit(0, LCD_FRAME_BUFFER);
+        BSP_LCD_SelectLayer(0);
+        BSP_LCD_DisplayOn();
+        BSP_LCD_Clear(LCD_COLOR_WHITE);
+    }
+    void displayText(const string& text, int line, uint32_t color) {
+        BSP_LCD_Clear(LCD_COLOR_WHITE);
+        BSP_LCD_SetTextColor(color);
+        BSP_LCD_DisplayStringAt(0, LINE(line), (uint8_t*)text.c_str(), CENTER_MODE);
+    }
+};
+
+enum State { IDLE, RECORDING, WAITING, UNLOCKING, CHECKING, LOCKED };
 
 int main() {
-  setup_gyro();
-  init_display();
+    SPI spi(PF_9, PF_8, PF_7);
+    DigitalOut cs(PC_1);
+    Gyroscope gyroscope(spi, cs);
+    LCDDisplay lcdDisplay;
+    vector<GyroData> recordData;
+    vector<GyroData> attemptData;
 
-  // Initialize arrays for recorded and attempted sequences
-  std::vector<GyroData> record(max_sequence_length);
-  std::vector<GyroData> attempt(max_sequence_length);
-  int index = 0;
-  int remaining_attempts = 5;
-  bool correct = false;
+    State state = IDLE;
+    const int MAX_ARR_LENGTH = 100;
+    const double THRESHOLD = 15000;
 
-  enter_key.fall(&updateState);
+    volatile bool flag = false;
 
-  while (1) {
-    if (flag) {
-      BSP_LCD_Clear(LCD_COLOR_WHITE);
-      BSP_LCD_SetTextColor(LCD_COLOR_BLACK);
-      switch (state) {
-        case IDLE:
-          record.clear();
-          attempt.clear();
-          state = RECORDING;
-          break;
-        case RECORDING:
-          BSP_LCD_DisplayStringAt(0, LINE(5), (uint8_t *)"Recording...", CENTER_MODE);
-          state = WAITING;
-          break;
-        case WAITING:
-          BSP_LCD_DisplayStringAt(0, LINE(5), (uint8_t *)"Unlock?", CENTER_MODE);
-          state = UNLOCKING;
-          index = 0;
-          break;
-        case UNLOCKING:
-          state = CHECKING;
-          break;
-        case CHECKING:
-          printf("Running Sequence Comparison\n");
-          correct = compare_sequences(record, attempt, 100);
-          if (!correct) {
-            BSP_LCD_SetTextColor(LCD_COLOR_RED);
-            BSP_LCD_DisplayStringAt(0, LINE(5), (uint8_t *)"Incorrect :(", CENTER_MODE);
-            if (remaining_attempts == 0) {
-              state = LOCKED;
-              break;
-            } else {
-              state = UNLOCKING;
-              remaining_attempts--;
-              printf("Incorrect. %d attempts remaining...\n", remaining_attempts);
-              break;
+    InterruptIn enterKey(USER_BUTTON);
+    enterKey.fall([&flag]() { flag = true; });
+    int remainingAttempts = 5;
+    
+    while (1) {
+        if (flag) {
+            switch (state) {
+                case IDLE:
+                    recordData.clear();
+                    attemptData.clear();
+                    printf("IDLE -> RECORDING\n");
+                    lcdDisplay.displayText("IDLE", 5, LCD_COLOR_BLACK);
+                    state = RECORDING;
+                    break;
+                case RECORDING:
+                    printf("RECORDING -> WAITING\n");
+                    lcdDisplay.displayText("Recording...", 5, LCD_COLOR_BLACK);
+                    state = WAITING;
+                    break;
+                case WAITING:
+                    printf("WAITING -> UNLOCKING\n");
+                    lcdDisplay.displayText("Unlocking", 5, LCD_COLOR_BLACK);
+                    state = UNLOCKING;
+                    break;
+                case UNLOCKING:
+                    printf("UNLOCKING -> CHECKING\n");
+                    state = CHECKING;
+                    break;
+                case CHECKING: {
+                    printf("Checking sequences\n");
+                    GyroSequenceMatcher sequenceMatcher(THRESHOLD);
+                    bool correct = sequenceMatcher.compare(recordData, attemptData);
+
+                    if (!correct) {
+                        lcdDisplay.displayText("Incorrect!", 5, LCD_COLOR_RED);
+                        lcdDisplay.displayText("-.-", 7, LCD_COLOR_RED);
+                        char buffer[32];
+                        sprintf(buffer, "Remaining: %d", remainingAttempts);
+                        lcdDisplay.displayText(buffer, 6, LCD_COLOR_RED);
+                        printf("Incorrect. %d attempts remaining...\n", remainingAttempts);
+
+                        if (remainingAttempts == 0) {
+                            state = LOCKED;
+                        } else {
+                            state = WAITING;
+                            remainingAttempts--;
+                        }
+                    } else {
+                        printf("Correct! Checking -> IDLE\n");
+                        lcdDisplay.displayText("Unlocked", 4, LCD_COLOR_GREEN);
+                        lcdDisplay.displayText("<3", 6, LCD_COLOR_GREEN);
+                        state = IDLE;
+                    }
+                    break;
+                }
+                case LOCKED:
+                    lcdDisplay.displayText("LOCKED.", 5, LCD_COLOR_BLACK);
+                    state = LOCKED;
+                    break;
+                default:
+                    state = IDLE;
+                    break;
             }
-          } else {
-            BSP_LCD_SetTextColor(LCD_COLOR_GREEN);
-            BSP_LCD_DisplayStringAt(0, LINE(5), (uint8_t *)"Unlocked :)", CENTER_MODE);
-            state = IDLE;
-            break;
-          }
-        case LOCKED: 
-          BSP_LCD_SetTextColor(LCD_COLOR_RED);
-          BSP_LCD_DisplayStringAt(0, LINE(5), (uint8_t *)"LOCKED.", CENTER_MODE);
-          state = LOCKED;
-          break;
-        default:
-          state = IDLE;
-          break;
-      }
-      flag = false;
-    } else if (state == RECORDING || state == UNLOCKING) {
-      if (index < max_sequence_length) {
-        if (state == RECORDING) {
-          record[index] = read_gyro();
-        } else {
-          attempt[index] = read_gyro();
+            flag = false;
+        } else if (state == RECORDING || state == UNLOCKING) {
+            if (recordData.size() < MAX_ARR_LENGTH) {
+                vector<GyroData>& data = (state == RECORDING) ? recordData : attemptData;
+                data.push_back(gyroscope.readData());
+                printf("%d, %d, %d\n", data.back().x, data.back().y, data.back().z);
+                wait_us(50000);
+            } else {
+                printf("Exceeded max array length\n");
+            }
         }
-        index++;
-      }
     }
-  }
 }
