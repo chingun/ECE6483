@@ -9,12 +9,41 @@
 
 using namespace std;
 
-extern "C" void wait_ms(int ms) { wait_us(1000*ms); }
+extern "C" void wait_ms(int ms) { wait_us(1000*ms); } // without this the code fails
 
-// Creativity Achievements:
+// Authors: Chingun Khasar [ck3411]
+//          Chinmay Nivsarkar [cmn8525]
+//          Daniel Plaza [dmp624]
+//          Deepika Venkatesan [dv2260]
+
+// Ability to successfully achieve the objectives:
+// 1. All sensor interface is built with reusable class based data structure. 
+// 2. The objective's algorithm is strictly followed 
+
+// Repeatability and robustness of unlock sequence:
+// 1. Button debouncing for better interrupt handling.
+// 2. Comparing Sequence matching with FFT as a way to correlate sequence inputs.
+
+// Repeatability and robustness of unlock sequence:
+// 1. Button debouncing for better interrupt handling.
+// 2. Comparing Sequence matching with FFT as a way to correlate sequence inputs.
+
+// Ease of use:
+// 1. Screen based user feedback and simple button instructions
+
+// Creativity:
 // 1. LCD Screen based user feed back
 // 2. Button debouncing for better lock performance
 // 3. User unlocks are numbered until completely locked out
+
+// Well written code:
+// 1. Class data structure based setup for gyroscope and recording functionality
+// 2. Commented and explained functionalities 
+
+// Complexity:
+// 1. Class data structure based setup for gyroscope and recording functionality
+// 2. Button debouncing for better interrupt handling.
+// 3. Experimentation with FFT as a way to correlate sequence inputs
 
 struct GyroData {
     int16_t x, y, z; //creating struct to store x, y, z data points
@@ -106,7 +135,7 @@ private:
     double computeCrossCorrelation(const vector<int16_t>& x, const vector<int16_t>& y) {
         int n = min(x.size(), y.size());
         double distance = 0;
-        int N = 0;
+        int N = 0; 
 
         for (int i = 0; i < n; i++) {
             if (x[i] && y[i]) {
@@ -114,8 +143,49 @@ private:
                 N++;
             }
         }
-
         return N ? distance / N : 0;
+    }
+    // We attempted to use FFT to better test the user inputs but it did not yield better results.
+    // We included the code anyways to show our thought process
+    double computeCrossCorrelationUsingFFT(const std::vector<int16_t>& x, const std::vector<int16_t>& y) {
+        int n = std::min(x.size(), y.size());
+        int paddedSize = 2 * std::pow(2, std::ceil(std::log2(n))); // Next power of 2 for efficient FFT
+        std::vector<std::complex<double>> fftX(paddedSize, 0.0);
+        std::vector<std::complex<double>> fftY(paddedSize, 0.0);
+
+        // Perform FFT on x
+        std::vector<float> inputX(paddedSize, 0.0);
+        for (int i = 0; i < n; i++) {
+            inputX[i] = static_cast<float>(x[i]);
+        }
+        fft(reinterpret_cast<float*>(inputX.data()), reinterpret_cast<float*>(fftX.data()), nullptr, paddedSize);
+
+        // Perform FFT on y
+        std::vector<float> inputY(paddedSize, 0.0);
+        for (int i = 0; i < n; i++) {
+            inputY[i] = static_cast<float>(y[i]);
+        }
+        fft(reinterpret_cast<float*>(inputY.data()), reinterpret_cast<float*>(fftY.data()), nullptr, paddedSize);
+
+        // Calculate cross-correlation in frequency domain
+        std::vector<std::complex<double>> crossCorr(paddedSize, 0.0);
+        for (int i = 0; i < paddedSize; i++) {
+            crossCorr[i] = std::conj(fftX[i]) * fftY[i];
+        }
+        std::vector<float> inputCorr(paddedSize, 0.0);
+        for (int i = 0; i < paddedSize; i++) {
+            inputCorr[i] = static_cast<float>(crossCorr[i].real());
+        }
+        ifft(reinterpret_cast<float*>(inputCorr.data()), reinterpret_cast<float*>(crossCorr.data()), nullptr, paddedSize);
+
+        // Find maximum value in cross-correlation
+        double maxCorrelation = 0.0;
+        for (int i = 0; i < n; i++) {
+            double correlation = std::abs(crossCorr[i]);
+            maxCorrelation = std::max(maxCorrelation, correlation);
+        }
+
+        return maxCorrelation;
     }
 
     double threshold;
@@ -154,12 +224,13 @@ int main() {
 
     State state = IDLE; //State when recording and attempting is not occuring
     const int MAX_ARR_LENGTH = 100; //Setting a maximum length for the amount of recorded data points
-    const double THRESHOLD = 15000; //Setting threshold for cross correlation
+    const double THRESHOLD = 150000; //Setting threshold for cross correlation
 
     volatile bool flag = false; //Initialize flag as false
     bool debounceInProgress = false;
     InterruptIn enterKey(USER_BUTTON); //Setting interrupt to user button
 
+    //Debounced interrupt so that sudden sharp recordings are ignored.
     enterKey.fall([&flag, &debounceInProgress]() {
         if (!debounceInProgress) {
             debounceInProgress = true;
@@ -222,9 +293,15 @@ int main() {
                         char buffer[32];
                         sprintf(buffer, "Remaining: %d", remainingAttempts); 
                         BSP_LCD_DisplayStringAt(0, LINE(6), (uint8_t *)buffer, CENTER_MODE);                       
+                        if (remainingAttempts == 3){
+                            lcdDisplay.displayText("-.-", 9, LCD_COLOR_RED);
+                        } else if (remainingAttempts == 2){
+                            lcdDisplay.displayText(">.<", 9, LCD_COLOR_RED);
+                        } else {
+                            lcdDisplay.displayText("T.T", 9, LCD_COLOR_RED);
+                        }
 
-                        lcdDisplay.displayText("-.-", 9, LCD_COLOR_RED);
-                        printf("Incorrect. %d attempts remaining...\n", remainingAttempts);
+                        printf("Incorrect. %d attempts remaining\n", remainingAttempts);
                         if (remainingAttempts == 0) {
                             state = LOCKED; //All attempts have been used
                         } else {
@@ -232,7 +309,7 @@ int main() {
                             remainingAttempts--; //If wrong attempt, remaining attempts are decremented
                         }
                     } else {
-                        printf("Correct! Checking -> IDLE\n"); // Attempted key is correct
+                        printf("Correct! Back to Setup\n"); // Attempted key is correct
                         BSP_LCD_Clear(LCD_COLOR_WHITE); //Clearing the screen
                         lcdDisplay.displayText("Welcome", 4, LCD_COLOR_GREEN);
                         lcdDisplay.displayText("<3", 6, LCD_COLOR_GREEN);
@@ -241,6 +318,7 @@ int main() {
                     break;
                 }
                 case LOCKED:
+                    BSP_LCD_Clear(LCD_COLOR_WHITE); //Clearing the screen
                     lcdDisplay.displayText("BLOCKED", 5, LCD_COLOR_BLACK);
                     state = LOCKED; //State when all attempts have been used
                     break;
